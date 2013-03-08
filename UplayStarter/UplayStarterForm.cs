@@ -72,7 +72,7 @@ namespace UplayStarter
             VisibleChanged += (o, e) => UpdateAero();
 
             _timer.Interval = 500;
-            _timer.Tick += (o, e) => processTick();
+            _timer.Tick += processTick;
         }
 
         private Color _defaultBackColor;
@@ -143,9 +143,11 @@ namespace UplayStarter
             }
             return children;
         }
-
-        private void processTick()
+         
+        private void processTick(object sender, EventArgs e)
         {
+            Console.WriteLine("Tick");
+
             if (uPlayProcess == null || uPlayProcessId == int.MinValue)
             {
                 // Get uPlay process and window
@@ -252,7 +254,15 @@ namespace UplayStarter
 
             Thread.Sleep(1000);
             uPlayProcess.Kill();
-            _timer.Enabled = _toggleItem.Checked;
+
+            uPlayProcess = null;
+            uPlayProcessId = int.MinValue;
+            uPlayWinHandle = IntPtr.Zero;
+
+            this.Invoke((MethodInvoker)delegate
+            {
+                _timer.Enabled = true;
+            });
         }
     }
 }
