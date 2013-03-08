@@ -22,6 +22,12 @@ namespace UplayStarter
         private NotifyIcon _trayIcon;
         private MenuItem _toggleItem;
 
+        Process uPlayProcess = null;
+        IntPtr uPlayWinHandle = IntPtr.Zero;
+        int uPlayProcessId = int.MinValue;
+
+        bool gameStartup = false;
+
         public UplayStarterForm()
         {
             InitializeComponent();
@@ -138,81 +144,115 @@ namespace UplayStarter
             return children;
         }
 
-        private int uplayProcess;
-        private int gameProcess;
-        private string gameProcessName;
-
         private void processTick()
         {
-            if (gameProcessName != null)
+            if (uPlayProcess == null || uPlayProcessId == int.MinValue)
             {
-                foreach (var process in Process.GetProcesses().Where(x => x.Id == gameProcess))
+                // Get uPlay process and window
+                if (uPlayProcess == null)
                 {
-                    if (process.HasExited || process.ProcessName.ToLower() != gameProcessName)
-                        break;
-                    return;
-                }
-                gameProcessName = null;
-                Thread.Sleep(5000);
-                foreach (var process in Process.GetProcesses())
-                {
-                    if (process.Id == uplayProcess)
+                    Console.WriteLine("Searching for uPlay");
+                    foreach (Process proc in Process.GetProcesses())
                     {
-                        process.Kill();
-                    }
-                }
-                return;
-            }
-
-            Win32API.EnumWindows((hwnd, data) =>
-            {
-                StringBuilder sb = new StringBuilder(1024);
-                Win32API.GetClassName(hwnd, sb, sb.Capacity);
-                if(sb.ToString() == "UplayPCWindowClass")
-                {
-                    Win32API.SetForegroundWindow(hwnd);
-
-                    var inputs = new List<Win32API.INPUT>();
-
-                    var keyInput = new Win32API.INPUT() {type = 1, U = new Win32API.InputUnion()};
-
-                    keyInput.U.ki = new Win32API.KEYBDINPUT();
-                    keyInput.U.ki.wVk = Win32API.VirtualKeyShort.TAB;
-                    inputs.Add(keyInput);
-
-                    keyInput.U.ki.time = 5;
-                    keyInput.U.ki.dwFlags = Win32API.KEYEVENTF.KEYUP;
-                    inputs.Add(keyInput);
-
-                    keyInput.U.ki.time = 10;
-                    keyInput.U.ki.wVk = Win32API.VirtualKeyShort.SPACE;
-                    keyInput.U.ki.dwFlags = 0;
-                    inputs.Add(keyInput);
-
-                    keyInput.U.ki.time = 15;
-                    keyInput.U.ki.dwFlags = Win32API.KEYEVENTF.KEYUP;
-                    inputs.Add(keyInput);
-
-                    Win32API.SendInput(inputs.Count, inputs.ToArray(), Win32API.INPUT.Size);
-
-                    Thread.Sleep(500);
-
-                    foreach (var process in Process.GetProcesses())
-                    {
-                        if (process.ProcessName.ToLower() == "uplay")
+                        if (proc.ProcessName.ToLower().Equals("uplay"))
                         {
-                            uplayProcess = process.Id;
-                            var list = ListChildProcesses(process.Id);
-                            if (list.Count == 0)
-                                return true;
-                            var child = list.First();
-                            gameProcessName = child.Item1.ToLower().Replace(".exe","");
-                            gameProcess = child.Item2;
+                            Console.WriteLine("uPlay process found");
+                            uPlayProcess = proc;
+                            break;
+                        }
+                    }
+
+                    if (uPlayProcess == null) return;
+
+                    while (uPlayProcess.MainWindowHandle == IntPtr.Zero)
+                    {
+                        Console.WriteLine("Waiting for main window handle");
+                        Thread.Sleep(500);
+                    }
+
+                    Console.WriteLine("Setting window handle");
+                    uPlayWinHandle = uPlayProcess.MainWindowHandle;
+                }
+
+                uPlayProcessId = uPlayProcess.Id;
+                Thread.Sleep(10000);
+            }
+            else if (!gameStartup)
+            {
+                // uPlay running, we need to wait for it to start up
+                // then we send our keys
+                Console.WriteLine("Sending input to uPlay");
+                Win32API.SetForegroundWindow(uPlayWinHandle);
+
+                SendKeys.SendWait("{TAB}");
+                SendKeys.SendWait("{TAB}");
+                SendKeys.SendWait("{ENTER}");
+                SendKeys.Flush();
+
+                // Then we wait for child processes to start up
+                gameStartup = true;
+                Thread.Sleep(5000);
+            }
+            else
+            {
+                List<Tuple<string, int>> children = ListChildProcesses(uPlayProcessId);
+
+                if (children.Count > 0)
+                {
+                    foreach (Tuple<string, int> child in children)
+                    {
+                        Process proc = Process.GetProcessById(child.Item2);
+
+                        if (proc != null)
+                        {
+                            proc.EnableRaisingEvents = true;
+                            proc.Exited += childProcessExited;
+                        }
+                    }
+
+                    _timer.Enabled = false;
+                    gameStartup = false;
+                }
+            }
+        }
+
+        void childProcessExited(object sender, EventArgs e)
+        {
+            if (sender is Process)
+            {
+                Process senderProc = sender as Process;
+
+                Thread.Sleep(1000);
+
+                List<Tuple<string, int>> children = ListChildProcesses(uPlayProcessId);
+
+                if (children.Count > 0)
+                {
+                    foreach (Tuple<string, int> child in children)
+                    {
+                        Process proc = Process.GetProcessById(child.Item2);
+
+                        if (proc != null && proc != senderProc)
+                        {
+                            proc.EnableRaisingEvents = true;
+                            proc.Exited += childProcessExited;
                         }
                     }
                 }
-                return true;
-            }, 0);
+                else
+                {
+                    CloseUPlay();
+                }
+            }
+        }
+
+        private void CloseUPlay()
+        {
+            Console.WriteLine("Killing uPlay process");
+
+            Thread.Sleep(1000);
+            uPlayProcess.Kill();
+            _timer.Enabled = _toggleItem.Checked;
         }
     }
 }
