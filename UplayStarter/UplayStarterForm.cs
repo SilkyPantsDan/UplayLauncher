@@ -73,6 +73,11 @@ namespace UplayStarter
 
             _timer.Interval = 500;
             _timer.Tick += processTick;
+
+            checkBox1.Checked = true;
+
+            _trayIcon.Visible = true;
+            _trayIcon.ShowBalloonTip(3000, "Uplay Starter Still Running!", "Uplay Starter will run in the background until closed.", ToolTipIcon.Info);
         }
 
         private Color _defaultBackColor;
